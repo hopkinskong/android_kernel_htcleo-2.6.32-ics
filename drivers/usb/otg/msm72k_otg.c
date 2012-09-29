@@ -499,6 +499,12 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 		ret = PTR_ERR(dev->pclk);
 		goto put_clk;
 	}
+
+	dev->otgclk = clk_get(NULL, "usb_otg_clk");
+	if (IS_ERR(dev->otgclk)) {
+		dev->otgclk = NULL;
+	}
+
 	if (dev->core_clk) {
 		dev->cclk = clk_get(NULL, "usb_hs_core_clk");
 		if (IS_ERR(dev->cclk)) {
@@ -508,18 +514,25 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 		}
 	}
 
+	dev->ebi1clk = clk_get(NULL, "ebi1_clk");
+	if (IS_ERR(dev->ebi1clk)) {
+                        pr_err("%s: failed to get ebil_clk\n", __func__);
+                        ret = PTR_ERR(dev->ebi1clk);
+                        goto put_cclk;
+	}
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		pr_err("%s: failed to get platform resource mem\n", __func__);
 		ret = -ENODEV;
-		goto put_cclk;
+		goto put_eclk;
 	}
 
 	dev->regs = ioremap(res->start, resource_size(res));
 	if (!dev->regs) {
 		pr_err("%s: ioremap failed\n", __func__);
 		ret = -ENOMEM;
-		goto put_cclk;
+		goto put_eclk;
 	}
 
 	dev->irq = platform_get_irq(pdev, 0);
@@ -534,6 +547,12 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 	if (dev->cclk)
 		clk_enable(dev->cclk);
 
+	if (dev->otgclk)
+		clk_enable(dev->otgclk);
+	writel(0, USB_USBINTR);
+	writel(0, USB_OTGSC);
+	if (dev->otgclk)
+		clk_disable(dev->otgclk);
 	/* To reduce phy power consumption and to avoid external LDO
 	 * on the board, PMIC comparators can be used to detect VBUS
 	 * session change.
@@ -591,6 +610,9 @@ free_otg_irq:
 	free_irq(dev->irq, dev);
 free_regs:
 	iounmap(dev->regs);
+put_eclk:
+	if(dev->ebi1clk)
+		clk_put(dev->ebi1clk);
 put_cclk:
 	if (dev->cclk)
 		clk_put(dev->cclk);
@@ -621,6 +643,11 @@ static int __exit msm_otg_remove(struct platform_device *pdev)
 		clk_put(dev->cclk);
 	clk_put(dev->pclk);
 	clk_put(dev->clk);
+        if(dev->ebi1clk)
+                clk_put(dev->ebi1clk);
+        if(dev->otgclk)
+                clk_put(dev->otgclk);
+
 	kfree(dev);
 	return 0;
 }
