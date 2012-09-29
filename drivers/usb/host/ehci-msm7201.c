@@ -91,6 +91,11 @@ static void msm7201_usb_setup(struct usb_hcd *hcd)
 	writel(0x02, USB_SBUSCFG);	/*boost performance to fix CRC error.*/
 #endif
 
+	//old-fix
+        /* select HOST mode */
+        writel(0x10|USBMODE_HOST, USB_USBMODE);  /* TODO CIAN - No idea what the 0x10 is for... */
+        msleep(1);
+
 	/* select ULPI phy */
 	writel(0x80000000, USB_PORTSC);
 
@@ -147,11 +152,21 @@ static int ehci_msm_run(struct usb_hcd *hcd)
 	struct ehci_hcd *ehci  = hcd_to_ehci(hcd);
 	int             retval = 0;
 	int     	port   = HCS_N_PORTS(ehci->hcs_params);
+
+	//old-fix
+	u32             temp;
 	u32 __iomem     *reg_ptr;
 	u32             hcc_params;
 
 	hcd->uses_new_polling = 1;
 	hcd->poll_rh = 0;
+
+	//old-fix
+        /* EHCI spec section 4.1 */
+        if ((retval = ehci_reset(ehci)) != 0) {
+                ehci_mem_cleanup(ehci);
+                return retval;
+        }
 
 	/* set hostmode */
 	reg_ptr = (u32 __iomem *)(((u8 __iomem *)ehci->regs) + USBMODE);
@@ -195,9 +210,28 @@ static int ehci_msm_run(struct usb_hcd *hcd)
 	msleep(5);
 	up_write(&ehci_cf_port_reset_rwsem);
 
+	
+	//old-fix
+	ehci->last_periodic_enable = ktime_get_real();
+
+        temp = HC_VERSION(ehci_readl(ehci, &ehci->caps->hc_capbase));
+        ehci_info (ehci,
+                "USB %x.%x started, EHCI %x.%02x%s\n",
+                ((ehci->sbrn & 0xf0)>>4), (ehci->sbrn & 0x0f),
+                temp >> 8, temp & 0xff,
+                ignore_oc ? ", overcurrent ignored" : "");
+
 	/*Enable appropriate Interrupts*/
 	ehci_writel(ehci, INTR_MASK,
 			&ehci->regs->intr_enable);
+
+	//old-fix
+        /* GRR this is run-once init(), being done every time the HC starts.
+         * So long as they're part of class devices, we can't do it init()
+         * since the class device isn't created that early.
+         */
+        create_debug_files(ehci);
+        create_companion_file(ehci);
 
 	return retval;
 }
@@ -244,7 +278,8 @@ static const struct hc_driver ehci_msm7201_hc_driver = {
 	.relinquish_port = ehci_relinquish_port,
 	.port_handed_over = ehci_port_handed_over,
 	// maybe neccessary:
-	//.clear_tt_buffer_complete = ehci_clear_tt_buffer_complete,
+	//old-fix
+	.clear_tt_buffer_complete = ehci_clear_tt_buffer_complete,
 };
 
 /**
@@ -264,6 +299,20 @@ static int usb_hcd_msm7201_remove(struct platform_device *pdev)
 	msm7201_shutdown_phy(hcd);
 	clk_put(msm7201->clk);
 	clk_put(msm7201->pclk);
+
+	//old-fix
+	if(msm7201->otgclk) {
+		clk_put(msm7201->otgclk);
+	}
+
+	if(msm7201->coreclk) {
+		clk_put(msm7201->coreclk);
+	}
+
+	if(msm7201->ebi1clk) {
+		clk_put(msm7201->ebi1clk);
+	}
+
 	iounmap(hcd->regs);
 	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 	usb_put_hcd(hcd);
@@ -289,10 +338,9 @@ static int usb_hcd_msm7201_probe(struct platform_device *pdev)
 	const struct hc_driver *driver = &ehci_msm7201_hc_driver;
 	struct msm_hsusb_platform_data *pdata = pdev->dev.platform_data;
 
+	USB_INFO("initializing MSM7201 USB Controller\n");
 	if (usb_disabled())
 		return -ENODEV;
-
-	pr_debug("initializing MSM7201 USB Controller\n");
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
@@ -300,8 +348,15 @@ static int usb_hcd_msm7201_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	
+	//old-fix
+	if (unlikely(set_irq_wake(irq, 1)))
+                return -ENXIO;
+
 	hcd = usb_create_hcd(driver, &pdev->dev, dev_name(&pdev->dev));
 	if (!hcd) {
+
+		USB_INFO("Create hcd failed.\n");
 		retval = -ENOMEM;
 		goto err1;
 	}
@@ -339,39 +394,70 @@ static int usb_hcd_msm7201_probe(struct platform_device *pdev)
 		goto err3;
 	}
 
-	msm7201->clk = clk_get(&pdev->dev, "usb_hs_clk");
+	msm7201->clk = clk_get(NULL, "usb_hs_clk");
 	if (IS_ERR(msm7201->clk)) {
 		dev_dbg(&pdev->dev, "error getting usb_hs_clk\n");
 		retval = -EFAULT;
 		goto err4;
 	}
 
-	msm7201->pclk = clk_get(&pdev->dev, "usb_hs_pclk");
+	msm7201->pclk = clk_get(NULL, "usb_hs_pclk");
 	if (IS_ERR(msm7201->pclk)) {
 		dev_dbg(&pdev->dev, "error getting usb_hs_pclk\n");
 		retval = -EFAULT;
 		goto err5;
 	}
 
-  clk_enable(msm7201->clk);
-  clk_enable(msm7201->pclk);
+	//old-fix
+	msm7201->otgclk = clk_get(&pdev->dev, "usb_otg_clk");
+        if (IS_ERR(msm7201->otgclk))
+                msm7201->otgclk = NULL;
 
-  /* wait for a while after enable usb clk*/
-  msleep(5);
+	msm7201->coreclk = clk_get(NULL, "usb_hs_core_clk");
+        if (IS_ERR(msm7201->coreclk))
+                msm7201->coreclk = NULL;
+
+	msm7201->ebi1clk = clk_get(NULL, "ebi1_clk");
+        if (IS_ERR(msm7201->ebi1clk)) {
+
+		dev_dbg(&pdev->dev, "error getting ebil_clk\n");
+		retval = -EFAULT;
+                goto err6;
+	}
+
+	if (msm7201->coreclk)
+                clk_enable(msm7201->coreclk);
+
+  	clk_enable(msm7201->clk);
+ 	clk_enable(msm7201->pclk);
+        if (msm7201->otgclk)
+                clk_enable(msm7201->otgclk);
+
+  	/* wait for a while after enable usb clk*/
+  	msleep(5);
 
 	/* clear interrupts before requesting irq */
 	writel(0, USB_USBINTR);
 	writel(0, USB_OTGSC);
+
+        retval = usb_add_hcd(hcd, irq, IRQF_SHARED);
+        /* wait 10ms */
+        msleep(10);
+
+	/* fixed: write irq before disable and after enable it */
 	disable_irq(irq);
-	retval = usb_add_hcd(hcd, irq, IRQF_SHARED);
-	enable_irq(irq); // Unbalanced (?)
+
 	/* enable interrupts */
-	writel(STS_URI | STS_SLI | STS_UI | STS_PCI, USB_USBINTR);
+        writel(STS_URI | STS_SLI | STS_UI | STS_PCI, USB_USBINTR);
+
+	enable_irq(irq); // Unbalanced (?)
 
 	if (retval != 0)
-		goto err6;
+		goto err7;
 	return retval;
 
+      err7:
+	clk_put(msm7201->ebi1clk);
       err6:
 	clk_put(msm7201->pclk);
       err5:
@@ -383,17 +469,17 @@ static int usb_hcd_msm7201_probe(struct platform_device *pdev)
       err2:
 	usb_put_hcd(hcd);
       err1:
-	dev_err(&pdev->dev, "init %s fail, %d\n", dev_name(&pdev->dev), retval);
+	dev_err(&pdev->dev, "init %s fail, err = %d\n", dev_name(&pdev->dev), retval);
 	return retval;
 }
 
-MODULE_ALIAS("platform:msm_hsusb");
+MODULE_ALIAS("platform:msm_hsusb_host");
 
 static struct platform_driver ehci_msm7201_driver = {
 	.probe = usb_hcd_msm7201_probe,
 	.remove = usb_hcd_msm7201_remove,
 	.shutdown = usb_hcd_platform_shutdown,
 	.driver = {
-		   .name = "msm_hsusb",
+		   .name = "msm_hsusb_host",
 	},
 };

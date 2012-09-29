@@ -72,7 +72,7 @@
 #include "devices.h"
 #include "proc_comm.h"
 #include "dex_comm.h"
-
+#include "pm.h"
 
 #define ATAG_MAGLDR_BOOT    0x4C47414D
 struct tag_magldr_entry
@@ -304,6 +304,57 @@ static uint32_t usb_phy_3v3_table[] =
 
 static int htcleo_phy_init_seq[] ={0x0C, 0x31, 0x30, 0x32, 0x1D, 0x0D, 0x1D, 0x10, -1};
 
+struct msm_hsusb_platform_data msm_hsusb_host_pdata = {
+        .phy_init_seq           = htcleo_phy_init_seq,
+        .phy_reset              = msm_hsusb_8x50_phy_reset,
+        .accessory_detect = 0, /* detect by ID pin gpio */
+
+#ifdef CONFIG_USB_FUNCTION
+        .vendor_id = 0x0bb4,
+        .product_id = 0x0c02,
+        .version = 0x0100,
+        .product_name = "Ultrasystem USB Controller",
+        .manufacturer_name = "HTC",
+
+        .functions = usb_functions,
+        .num_functions = ARRAY_SIZE(usb_functions),
+        .products = usb_products,
+        .num_products = ARRAY_SIZE(usb_products),
+#endif
+};
+
+struct msm_hsusb_platform_data msm_hsusb_udc_pdata = {
+        .phy_init_seq           = htcleo_phy_init_seq,
+        .phy_reset              = msm_hsusb_8x50_phy_reset,
+        .accessory_detect = 0, /* detect by ID pin gpio */
+
+#ifdef CONFIG_USB_FUNCTION
+        .vendor_id = 0x0bb4,
+        .product_id = 0x0c02,
+        .version = 0x0100,
+        .product_name = "Ultrasystem USB Controller",
+        .manufacturer_name = "HTC",
+
+        .functions = usb_functions,
+        .num_functions = ARRAY_SIZE(usb_functions),
+        .products = usb_products,
+        .num_products = ARRAY_SIZE(usb_products),
+#endif
+};
+
+static struct msm_otg_platform_data msm_otg_pdata = {
+	.phy_init_seq           = htcleo_phy_init_seq,
+	.phy_reset		= msm_hsusb_8x50_phy_reset,
+
+	.pmic_vbus_irq		 = 0,
+
+	.pmic_notif_init         = NULL,
+	.pmic_notif_deinit       = NULL,
+	.pmic_register_vbus_sn   = NULL,
+	.pmic_unregister_vbus_sn = NULL,
+	.pmic_enable_ldo         = NULL,
+};
+
 #ifdef CONFIG_USB_ANDROID
 static struct msm_hsusb_platform_data msm_hsusb_pdata = {
 	.phy_init_seq		= htcleo_phy_init_seq,
@@ -360,6 +411,34 @@ static struct platform_device android_usb_device = {
 		.platform_data = &android_usb_pdata,
 	},
 };
+
+static struct msm_pm_platform_data msm_pm_data[MSM_PM_SLEEP_MODE_NR] = {
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].supported = 1,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].suspend_enabled = 1,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].idle_enabled = 1,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].latency = 8594,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].residency = 23740,
+
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].supported = 1,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].suspend_enabled = 1,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].idle_enabled = 1,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].latency = 4594,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].residency = 23740,
+
+	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].supported = 1,
+	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].suspend_enabled
+		= 1,
+	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].idle_enabled = 0,
+	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency = 443,
+	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].residency = 1098,
+
+	[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT].supported = 1,
+	[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT].suspend_enabled = 1,
+	[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT].idle_enabled = 1,
+	[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT].latency = 2,
+	[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT].residency = 0,
+};
+
 static void htcleo_add_usb_devices(void)
 {
 	android_usb_pdata.products[0].product_id =
@@ -369,6 +448,22 @@ static void htcleo_add_usb_devices(void)
 	msm_device_hsusb.dev.platform_data = &msm_hsusb_pdata;
 	config_gpio_table(usb_phy_3v3_table, ARRAY_SIZE(usb_phy_3v3_table));
 	gpio_set_value(HTCLEO_GPIO_USBPHY_3V3_ENABLE, 1);
+
+#ifdef CONFIG_USB_MSM_OTG_72K
+	msm_device_otg.dev.platform_data = &msm_otg_pdata;
+	platform_device_register(&msm_device_otg);
+#endif
+
+	/* support for ehci host */
+        msm_hsusb_host_pdata.serial_number = board_serialno();
+        msm_device_hsusb_host.dev.platform_data = &msm_hsusb_host_pdata;
+        platform_device_register(&msm_device_hsusb_host);
+
+	/* for test */
+        msm_hsusb_udc_pdata.serial_number = board_serialno();
+        msm_device_hsusb_udc.dev.platform_data = &msm_hsusb_udc_pdata;
+	platform_device_register(&msm_device_hsusb_udc);
+
 	platform_device_register(&msm_device_hsusb);
 	platform_device_register(&usb_mass_storage_device);
 #ifdef CONFIG_USB_ANDROID_RNDIS

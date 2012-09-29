@@ -1,36 +1,46 @@
-#!/bin/sh
+#!/bin/bash
+MAKEFLAGS='-j16'
+CROSS_COMPILE=/arm/android/source/prebuilt/linux-x86/toolchain/arm-eabi-4.4.0/bin/arm-eabi-
+ARCH=arm
+KERNEL_BUILD_PATH=./
 
-export KERNELBASEDIR=$PWD/../ICS_Kernel_update-zip-files
-#export TOOLCHAIN=$HOME/CodeSourcery/Sourcery_G++_Lite/bin/arm-none-eabi-
-export TOOLCHAIN=$HOME/arm-2010q1/bin/arm-none-eabi-
+export KERNEL_BUILD_PATH ARCH CROSS_COMPILE MAKEFLAGS
 
-export KERNEL_FILE=HTCLEO-Kernel_2.6.32-ics_tytung_HWA
+TIME_START=`date +%s`;
 
-rm arch/arm/boot/zImage
-make htcleo_defconfig
-make ARCH=arm CROSS_COMPILE=$TOOLCHAIN zImage -j8 && make ARCH=arm CROSS_COMPILE=$TOOLCHAIN modules -j8
+echo === Building kernel ===
 
-if [ -f arch/arm/boot/zImage ]; then
+cd $KERNEL_BUILD_PATH
+echo === CURRENT DIRECTORY: $PWD ===
 
-mkdir -p $KERNELBASEDIR/
-rm -rf $KERNELBASEDIR/boot/*
-rm -rf $KERNELBASEDIR/system/lib/modules/*
-mkdir -p $KERNELBASEDIR/boot
-mkdir -p $KERNELBASEDIR/system/
-mkdir -p $KERNELBASEDIR/system/lib/
-mkdir -p $KERNELBASEDIR/system/lib/modules
+#make clean
+make prepare
+make zImage
 
-cp -a arch/arm/boot/zImage $KERNELBASEDIR/boot/zImage
-
-make ARCH=arm CROSS_COMPILE=$TOOLCHAIN INSTALL_MOD_PATH=$KERNELBASEDIR/system/lib/modules modules_install -j8
-
-cd $KERNELBASEDIR/system/lib/modules
-find -iname *.ko | xargs -i -t cp {} .
-rm -rf $KERNELBASEDIR/system/lib/modules/lib
-stat $KERNELBASEDIR/boot/zImage
-cd ../../../
-zip -r ${KERNEL_FILE}_`date +"%Y%m%d_%H_%M"`.zip boot system META-INF work
-else
-echo "Kernel STUCK in BUILD! no zImage exist"
+if [ $? -ne 0 ]; then
+echo === Kernel build FAILED! ===
+exit 1;
 fi
+
+make modules
+
+if [ $? -ne 0 ]; then
+echo ===Modules build FAILED! ===
+exit 1;
+fi
+
+TIME_DONE=`date +%s`;
+LAPSEDM=`echo "($TIME_DONE - $TIME_START)/60" | bc`
+LAPSEDS=`echo "($TIME_DONE - $TIME_START)%60" | bc`
+echo ''
+echo == Build complete in $LAPSEDM m $LAPSEDS s ==
+
+echo ''
+echo == Change to images directory ==
+cd /arm/android/newimg
+KERNEL_IMAGE=${OLDPWD}/arch/arm/boot/zImage
+echo ''
+echo Kernel selected:${KERNEL_IMAGE}
+./packet-boot.sh $KERNEL_IMAGE
+echo 'Packet done.'
 

@@ -16,6 +16,11 @@
 #ifndef __ARCH_ARM_MACH_MSM_DEVICES_H
 #define __ARCH_ARM_MACH_MSM_DEVICES_H
 
+/* for ultrakernel */
+extern struct platform_device msm_device_hsusb_host;
+extern struct platform_device msm_device_otg;
+extern struct platform_device msm_device_hsusb_udc;
+
 extern struct platform_device msm_device_uart1;
 extern struct platform_device msm_device_uart2;
 extern struct platform_device msm_device_uart3;

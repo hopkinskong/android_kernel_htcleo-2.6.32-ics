@@ -19,6 +19,8 @@
 
 #include <linux/types.h>
 
+#define USB_MAGIC_CODE		'LiIo'
+
 /* platform device data for msm_hsusb driver */
 
 #ifdef CONFIG_USB_FUNCTION
@@ -33,6 +35,46 @@ struct msm_hsusb_product {
 	__u32 functions;
 };
 #endif
+
+#ifdef CONFIG_USB_GADGET_MSM_72K
+enum chg_type {
+        USB_CHG_TYPE__SDP,
+        USB_CHG_TYPE__CARKIT,
+        USB_CHG_TYPE__WALLCHARGER,
+        USB_CHG_TYPE__INVALID,
+#ifdef CONFIG_SUPPORT_ALIEN_USB_CHARGER
+        USB_CHG_TYPE__MIGHT_BE_HOST_PC,
+        USB_CHG_TYPE__ALIENCHARGER,
+#endif /*  CONFIG_SUPPORT_ALIEN_USB_CHARGER */
+};
+#endif
+
+
+struct msm_otg_platform_data {
+	int (*phy_reset)(void __iomem *);
+	/* val, reg pairs terminated by -1 */
+        int *phy_init_seq;
+
+	unsigned int core_clk;
+	int pmic_vbus_irq;
+	int pclk_required_during_lpm;
+
+	/* pmic notfications apis */
+	int (*pmic_notif_init) (void);
+	void (*pmic_notif_deinit) (void);
+	int (*pmic_register_vbus_sn) (void (*callback)(int online));
+	void (*pmic_unregister_vbus_sn) (void (*callback)(int online));
+	int (*pmic_enable_ldo) (int);
+};
+
+struct msm_hsusb_gadget_platform_data {
+        int *phy_init_seq;
+        void (*phy_reset)(void);
+
+        u32 swfi_latency;
+        int self_powered;
+};
+
 
 struct msm_hsusb_platform_data {
 	/* hard reset the ULPI PHY */
