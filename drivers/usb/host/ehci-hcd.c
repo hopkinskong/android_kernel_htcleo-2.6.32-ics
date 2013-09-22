@@ -32,6 +32,7 @@
 #include <linux/list.h>
 #include <linux/interrupt.h>
 #include <linux/usb.h>
+#include <mach/msm_hsusb.h>
 #include <linux/moduleparam.h>
 #include <linux/dma-mapping.h>
 #include <linux/debugfs.h>
@@ -66,7 +67,8 @@
 static const char	hcd_name [] = "ehci_hcd";
 
 
-#undef VERBOSE_DEBUG
+//#undef VERBOSE_DEBUG
+#define VERBOSE_DEBUG
 #undef EHCI_URB_TRACE
 
 #ifdef DEBUG
@@ -703,9 +705,16 @@ static int ehci_run (struct usb_hcd *hcd)
 
 static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 {
-	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+	struct ehci_hcd		*ehci;
 	u32			status, masked_status, pcd_status = 0, cmd;
 	int			bh;
+
+	if(*(unsigned long *)hcd == USB_MAGIC_CODE) {
+
+		return IRQ_NONE;
+	}
+
+	ehci = hcd_to_ehci(hcd);
 
 	spin_lock (&ehci->lock);
 
@@ -1134,6 +1143,11 @@ MODULE_LICENSE ("GPL");
 #ifdef CONFIG_USB_EHCI_MSM7201
 #include "ehci-msm7201.c"
 #define PLATFORM_DRIVER         ehci_msm7201_driver
+#endif
+
+#ifdef CONFIG_USB_EHCI_MSM72K
+#include "ehci-msm72k.c"
+#define PLATFORM_DRIVER         msm72k_ehci_driver
 #endif
 
 #ifdef CONFIG_USB_W90X900_EHCI

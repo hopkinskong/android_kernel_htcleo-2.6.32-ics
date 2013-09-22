@@ -183,6 +183,9 @@ extern void android_set_serialno(char *serialno);
 #define USB_FLAG_CONFIGURED     0x0020
 
 struct usb_info {
+
+	unsigned long magic_code;
+
 	/* lock for register/queue/device state changes */
 	spinlock_t lock;
 
@@ -321,6 +324,7 @@ static void send_usb_connect_notify(struct work_struct *w)
 
 int usb_register_notifier(struct t_usb_status_notifier *notifier)
 {
+
 	if (!notifier || !notifier->name || !notifier->func)
 		return -EINVAL;
 
@@ -1096,6 +1100,12 @@ static irqreturn_t usb_interrupt(int irq, void *data)
 	struct usb_info *ui = data;
 	unsigned n;
 	unsigned long flags;
+
+        /* for foked OTG */
+        if(ui->magic_code != USB_MAGIC_CODE) {
+                /* we not handle this irq */
+                return IRQ_NONE;
+        }
 
 	n = readl(USB_USBSTS);
 	writel(n, USB_USBSTS);
@@ -2892,6 +2902,7 @@ static int msm72k_probe(struct platform_device *pdev)
 
 	spin_lock_init(&ui->lock);
 	ui->pdev = pdev;
+	ui->magic_code = USB_MAGIC_CODE;
 
 	if (pdev->dev.platform_data) {
 		struct msm_hsusb_platform_data *pdata = pdev->dev.platform_data;
@@ -2953,7 +2964,7 @@ static int msm72k_probe(struct platform_device *pdev)
 #ifdef CONFIG_ARCH_MSM7X30
 	msm_hsusb_rpc_connect();
 #endif
-	ui->clk = clk_get(&pdev->dev, "usb_hs_clk");
+	ui->clk = clk_get(NULL, "usb_hs_clk");
 	if (IS_ERR(ui->clk))
 		return usb_free(ui, PTR_ERR(ui->clk));
 
@@ -2970,15 +2981,15 @@ static int msm72k_probe(struct platform_device *pdev)
 			clk_set_rate(ui->pclk_src, 64000000);
 	}
 
-	ui->pclk = clk_get(&pdev->dev, "usb_hs_pclk");
+	ui->pclk = clk_get(NULL, "usb_hs_pclk");
 	if (IS_ERR(ui->pclk))
 		return usb_free(ui, PTR_ERR(ui->pclk));
 
-	ui->otgclk = clk_get(&pdev->dev, "usb_otg_clk");
+	ui->otgclk = clk_get(NULL, "usb_otg_clk");
 	if (IS_ERR(ui->otgclk))
 		ui->otgclk = NULL;
 
-	ui->coreclk = clk_get(&pdev->dev, "usb_hs_core_clk");
+	ui->coreclk = clk_get(NULL, "usb_hs_core_clk");
 	if (IS_ERR(ui->coreclk))
 		ui->coreclk = NULL;
 
@@ -3003,7 +3014,7 @@ static int msm72k_probe(struct platform_device *pdev)
 		clk_disable(ui->coreclk);
 
 	ui->in_lpm = 1;
-	ret = request_irq(irq, usb_interrupt, 0, pdev->name, ui);
+	ret = request_irq(irq, usb_interrupt, IRQF_SHARED /* set shared irq for fake OTG */ , pdev->name, ui);
 	if (ret)
 		return usb_free(ui, ret);
 	enable_irq_wake(irq);
